@@ -1,0 +1,645 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Suppressor Design Explorer</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #1c2230; --muted: #5b6475; --line: #d9dde5;
+    --accent: #2f6fde; --ok: #1f8a4c; --warn: #b7791f; --bad: #c53030; --viewport: #e9ecf1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151b; --panel: #1b2029; --ink: #e6e9ef; --muted: #9aa3b2; --line: #2c3340;
+      --accent: #6c9cff; --ok: #4cc38a; --warn: #e0b04f; --bad: #ff6b6b; --viewport: #0d1015;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151b; --panel: #1b2029; --ink: #e6e9ef; --muted: #9aa3b2; --line: #2c3340;
+    --accent: #6c9cff; --ok: #4cc38a; --warn: #e0b04f; --bad: #ff6b6b; --viewport: #0d1015;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 16px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap;
+    gap: 12px; align-items: center; justify-content: space-between; }
+  header h1 { font-size: 18px; margin: 0; }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tabs button { border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+  .tabs button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  main { display: grid; grid-template-columns: 300px 1fr 340px; gap: 12px; padding: 12px 16px; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+    margin: 0 0 10px; }
+  .stack > * + * { margin-top: 12px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  .field { margin-bottom: 10px; }
+  .field .row { display: flex; gap: 8px; align-items: center; }
+  .field output { min-width: 64px; text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; }
+  input[type=range] { flex: 1; width: 100%; accent-color: var(--accent); }
+  select { width: 100%; padding: 6px; border-radius: 6px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--ink); }
+  .toggles { display: flex; flex-wrap: wrap; gap: 10px; font-size: 13px; }
+  .toggles label { display: flex; gap: 5px; align-items: center; color: var(--ink); margin: 0; }
+  #viewport { position: relative; min-height: 460px; background: var(--viewport); border-radius: 10px;
+    border: 1px solid var(--line); overflow: hidden; }
+  #viewport canvas { display: block; width: 100% !important; height: 100% !important; }
+  #legend { position: absolute; left: 10px; bottom: 10px; font-size: 12px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; opacity: .92; }
+  #legend span { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 8px; vertical-align: -1px; }
+  #glfail { display: none; padding: 24px; color: var(--muted); }
+  .center { display: grid; grid-template-rows: minmax(460px, 58vh) auto; gap: 12px; }
+  .kv { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; font-size: 13px; }
+  .kv div:nth-child(even) { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .verdict { padding: 10px; border-radius: 8px; font-weight: 700; margin-bottom: 10px; border: 1px solid; }
+  .verdict.ok { color: var(--ok); border-color: var(--ok); }
+  .verdict.warn { color: var(--warn); border-color: var(--warn); }
+  .verdict.bad { color: var(--bad); border-color: var(--bad); }
+  .bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 4px 0 10px; }
+  .bar > i { display: block; height: 100%; }
+  .score { display: grid; grid-template-columns: 130px 1fr 28px; gap: 6px; align-items: center; font-size: 12px; margin-bottom: 5px; }
+  .pips { display: flex; gap: 3px; }
+  .pips i { flex: 1; height: 7px; border-radius: 2px; background: var(--line); }
+  .pips i.on { background: var(--accent); }
+  ul.notes { margin: 0; padding-left: 18px; font-size: 13px; }
+  ul.notes li { margin-bottom: 4px; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .legal { border-left: 4px solid var(--warn); }
+  details summary { cursor: pointer; font-weight: 600; }
+  details p, details li { font-size: 13px; }
+  footer { padding: 0 16px 24px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Suppressor Design Explorer</h1>
+    <p>Educational model of the three common architectures, with a hoop-stress wall check and design trade-offs.</p>
+  </div>
+  <div class="tabs" id="archTabs">
+    <button data-arch="mono" class="active">Monocore</button>
+    <button data-arch="k">K-Baffle Stack</button>
+    <button data-arch="print">Fully 3D Printed</button>
+  </div>
+</header>
+
+<main>
+  <!-- Controls -->
+  <section class="stack">
+    <div class="card">
+      <h2>Host &amp; load</h2>
+      <div class="field">
+        <label for="caliber">Caliber</label>
+        <select id="caliber"></select>
+      </div>
+      <div class="field">
+        <label for="barrel">Barrel length (in)</label>
+        <div class="row"><input type="range" id="barrel" min="3" max="24" step="0.5"><output id="barrelOut"></output></div>
+      </div>
+      <div class="field">
+        <label for="duty">Firing schedule (sets design temperature)</label>
+        <select id="duty">
+          <option value="0">Slow fire, &lt;150 °C</option>
+          <option value="1" selected>Sustained strings, ~300 °C</option>
+          <option value="2">Rapid / full-auto, ~600 °C</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Geometry</h2>
+      <div class="field">
+        <label for="material">Tube / core material</label>
+        <select id="material"></select>
+      </div>
+      <div class="field">
+        <label for="od">Outer diameter (in)</label>
+        <div class="row"><input type="range" id="od" min="1.0" max="2.0" step="0.01"><output id="odOut"></output></div>
+      </div>
+      <div class="field">
+        <label for="wall">Tube wall thickness (in)</label>
+        <div class="row"><input type="range" id="wall" min="0.020" max="0.250" step="0.005"><output id="wallOut"></output></div>
+      </div>
+      <div class="field">
+        <label for="len">Overall length (in)</label>
+        <div class="row"><input type="range" id="len" min="4" max="10" step="0.1"><output id="lenOut"></output></div>
+      </div>
+      <div class="field">
+        <label for="count">Baffles / chambers</label>
+        <div class="row"><input type="range" id="count" min="3" max="12" step="1"><output id="countOut"></output></div>
+      </div>
+      <div class="field">
+        <label for="blast">Blast chamber length (in)</label>
+        <div class="row"><input type="range" id="blast" min="0.5" max="3" step="0.05"><output id="blastOut"></output></div>
+      </div>
+      <div class="field">
+        <label for="sf">Safety factor on yield</label>
+        <div class="row"><input type="range" id="sf" min="1.5" max="4" step="0.1" value="2"><output id="sfOut"></output></div>
+      </div>
+      <div class="field">
+        <label for="dlf">Dynamic load factor (blast impulse)</label>
+        <div class="row"><input type="range" id="dlf" min="1" max="3" step="0.1" value="2"><output id="dlfOut"></output></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>View</h2>
+      <div class="toggles">
+        <label><input type="checkbox" id="cut" checked> Cutaway</label>
+        <label><input type="checkbox" id="explode"> Explode</label>
+        <label><input type="checkbox" id="spin"> Auto-rotate</label>
+        <label><input type="checkbox" id="gas" checked> Gas path</label>
+      </div>
+      <p class="muted">Drag to orbit, scroll to zoom, right-drag to pan.</p>
+    </div>
+  </section>
+
+  <!-- Viewport + architecture notes -->
+  <section class="center">
+    <div id="viewport">
+      <div id="glfail">WebGL is not available in this browser, so the 3D view can't be drawn. The calculations still work.</div>
+      <div id="legend"></div>
+    </div>
+    <div class="card" id="archCard"></div>
+  </section>
+
+  <!-- Results -->
+  <section class="stack">
+    <div class="card">
+      <h2>Pressure &amp; wall check</h2>
+      <div id="verdict" class="verdict"></div>
+      <div class="muted">Hoop stress utilisation (stress ÷ allowable)</div>
+      <div class="bar"><i id="utilBar"></i></div>
+      <div class="kv" id="pressureKv"></div>
+    </div>
+    <div class="card">
+      <h2>Critical control points</h2>
+      <div id="scores"></div>
+      <p class="muted">Relative 1–5 scores from a simple heuristic model built on the trends independent testing has reported. They are not measured values.</p>
+    </div>
+    <div class="card">
+      <h2>Design flags</h2>
+      <ul class="notes" id="flags"></ul>
+    </div>
+  </section>
+</main>
+
+<footer class="stack">
+  <div class="card legal">
+    <h2>Legal</h2>
+    <p style="margin:0;font-size:13px">In the United States a suppressor is regulated under the National Firearms Act. Making one requires an <strong>approved ATF Form 1 before any manufacturing begins</strong>, including parts and "solvent trap" kits intended for conversion, plus the required engraving. Several states prohibit civilian ownership entirely, and most other countries have their own rules. This page is a conceptual teaching aid. It produces no machining drawings or print files.</p>
+  </div>
+  <div class="card">
+    <details>
+      <summary>Method, sources and limits</summary>
+      <ul>
+        <li><strong>Muzzle pressure</strong> comes from approximate published reference values for each cartridge, scaled with barrel length as P ∝ L<sup>-1.3</sup> and capped at 60 % of the SAAMI chamber limit. Real values depend heavily on the powder, bullet and barrel.</li>
+        <li><strong>Blast chamber pressure</strong> treats the gas column (case capacity + bore volume) at muzzle pressure as expanding isentropically into the blast chamber: P<sub>bc</sub> = P<sub>m</sub>·(V<sub>gas</sub>/(V<sub>gas</sub>+V<sub>bc</sub>))<sup>1.25</sup>. This quasi-static estimate is why a bigger blast chamber lowers the load on the wall.</li>
+        <li><strong>Design wall pressure</strong> = P<sub>bc</sub> × dynamic load factor. The DLF covers the impulsive, reflected-shock part of the load that the quasi-static estimate misses. Raise it for short barrels, sealed designs and full-auto use.</li>
+        <li><strong>Wall check</strong> uses the Lamé thick-wall solution for peak hoop stress at the bore of the tube: σ = P(r<sub>o</sub>² + r<sub>i</sub>²)/(r<sub>o</sub>² − r<sub>i</sub>²). The allowable stress is yield × temperature knock-down × process factor ÷ safety factor.</li>
+        <li><strong>Not modelled:</strong> baffle strikes, erosion, fatigue from cycling, thread and end-cap shear, notch effects, porosity in printed parts, or the extra load when a bullet is off-axis. Real products are proven by proof-firing and destructive testing, not by this formula.</li>
+        <li><strong>Industry practice</strong>, such as stacked-baffle cans, welded or integral stacks, flow-through printed Inconel and titanium designs, and monocore rimfire and pistol cans, is described here only in general terms that are publicly known. The material values are typical handbook numbers, not any manufacturer's specification.</li>
+        <li><strong>PEW Science</strong> publishes independent suppressor test reports: muzzle and at-ear sound pressure, the Suppressor Sound Rating, first-round pop, back pressure and gas flow. This page does not reproduce their proprietary data. The scores follow the general trends their reports discuss. For real numbers, read their reports.</li>
+        <li><strong>Open-source community 3D-printed designs</strong> are described only as a category. No files from them are included or linked.</li>
+      </ul>
+    </details>
+  </div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+// ---------- Data ----------
+// refPm: approx. muzzle pressure (ksi) at refLen (in). bullet: diameter (in). saami: max chamber pressure (ksi)
+// caseV: approx. case capacity (in^3)
+const CALIBERS = {
+  "22lr":  { name: ".22 LR",        bullet: 0.224, refLen: 16, refPm: 1.2, saami: 24, caseV: 0.012, defLen: 16,  centerfire: false },
+  "9mm":   { name: "9mm Luger",     bullet: 0.355, refLen: 4.5, refPm: 6.5, saami: 35, caseV: 0.037, defLen: 4.5, centerfire: true },
+  "45acp": { name: ".45 ACP",       bullet: 0.452, refLen: 5,  refPm: 4.5, saami: 21, caseV: 0.100, defLen: 5,   centerfire: true },
+  "300blk":{ name: ".300 BLK (super)", bullet: 0.308, refLen: 9, refPm: 9, saami: 55, caseV: 0.080, defLen: 9,  centerfire: true },
+  "556":   { name: "5.56 NATO",     bullet: 0.224, refLen: 16, refPm: 11, saami: 62, caseV: 0.113, defLen: 16,  centerfire: true },
+  "308":   { name: ".308 Win",      bullet: 0.308, refLen: 16, refPm: 13, saami: 62, caseV: 0.210, defLen: 16,  centerfire: true },
+};
+
+// yield in ksi; derate = strength retained at [150, 300, 600 °C]; proc = process / anisotropy factor
+const MATERIALS = {
+  ti64:    { name: "Ti-6Al-4V (Gr 5), machined", y: 128, rho: 4.43, derate: [0.92, 0.75, 0.45], proc: 1.0,  kind: "metal" },
+  ss174:   { name: "17-4 PH H1025, machined",    y: 145, rho: 7.80, derate: [0.95, 0.88, 0.45], proc: 1.0,  kind: "metal" },
+  ss316:   { name: "316L stainless, annealed",   y: 30,  rho: 8.00, derate: [0.90, 0.75, 0.60], proc: 1.0,  kind: "metal" },
+  al7075:  { name: "7075-T6 aluminium",          y: 73,  rho: 2.81, derate: [0.80, 0.25, 0.0],  proc: 1.0,  kind: "metal" },
+  in718am: { name: "Inconel 718, DMLS + aged",   y: 150, rho: 8.19, derate: [0.97, 0.93, 0.85], proc: 0.85, kind: "am" },
+  ti64am:  { name: "Ti-6Al-4V, DMLS + HIP",      y: 120, rho: 4.43, derate: [0.92, 0.75, 0.45], proc: 0.85, kind: "am" },
+  pacf:    { name: "Nylon-CF (FDM), polymer",    y: 9,   rho: 1.20, derate: [0.35, 0.0, 0.0],   proc: 0.55, kind: "poly" },
+  petg:    { name: "PETG (FDM), polymer",        y: 7,   rho: 1.27, derate: [0.0, 0.0, 0.0],    proc: 0.55, kind: "poly" },
+};
+
+const ARCH = {
+  mono: {
+    title: "Monocore",
+    defMat: "ti64", mats: ["ti64", "ss174", "al7075", "ss316"],
+    defaults: { od: 1.0, wall: 0.035, len: 5.5, count: 6, blast: 0.8 },
+    desc: `A single machined core slides into a tube. Its angled cuts and side ports form a chain of
+      chambers, and the gas alternates sides as it moves forward. This layout is common in older and
+      budget rimfire and pistol cans because it is one part and easy to take out for cleaning.`,
+    pros: ["One-piece core, simple to strip and clean", "Low part count, cheap to machine", "Low back pressure, because the gas path is fairly open"],
+    cons: ["Usually less suppression per unit of volume than a sealed baffle stack", "The core can carbon-lock into the tube if it isn't cleaned", "Thin ramps erode quickly with centerfire rifle gas"],
+    suppression: 2, back: 4, frp: 2, durability: 2, clean: 5,
+  },
+  k: {
+    title: "K-Baffle Stack",
+    defMat: "ss174", mats: ["ss174", "ti64", "ss316", "al7075", "in718am"],
+    defaults: { od: 1.5, wall: 0.060, len: 7.0, count: 8, blast: 1.3 },
+    desc: `Separate cone baffles with an integral spacer skirt and a reverse "scoop" lip, which gives
+      the K-shaped section. Each baffle splits the jet. The cone strips gas off the bore line and the
+      lip turns it rearward into the space between the cone and the tube. Stacked-baffle cans have
+      long been the mainstream commercial rifle design, often welded or made integral with the tube.`,
+    pros: ["Strong suppression per unit of volume", "The cone shape tolerates baffle strike and erosion well", "Easy to tune: count, spacing and blast-chamber volume"],
+    cons: ["Higher back pressure on gas guns, so more gas reaches the shooter's face", "Many parts to tolerance; concentricity is critical", "Welded stacks can't be cleaned in solvent"],
+    suppression: 4, back: 2, frp: 3, durability: 4, clean: 2,
+  },
+  print: {
+    title: "Fully 3D Printed",
+    defMat: "in718am", mats: ["in718am", "ti64am", "pacf", "petg"],
+    defaults: { od: 1.6, wall: 0.050, len: 6.5, count: 7, blast: 1.4 },
+    desc: `Tube and baffles printed as one part. Metal powder-bed printing (DMLS or LPBF) makes
+      geometry possible that can't be machined: helical or flow-through outer channels, coaxial
+      paths and variable-thickness walls. Several major makers now sell printed Inconel and titanium
+      cans built around reduced back pressure. Hobby polymer prints are a different category. They
+      are low-temperature, short-lived, and only suited to low-pressure rimfire use.`,
+    pros: ["Freedom of geometry: flow-through and coaxial designs", "No welds or stack tolerances; one sealed part", "Inconel keeps its strength at full-auto temperatures"],
+    cons: ["Can't be disassembled; porosity and trapped powder have to be controlled", "Needs stress relief or HIP and a CT scan or proof test to trust", "Polymers soften within a few rounds of centerfire heat"],
+    suppression: 4, back: 4, frp: 4, durability: 4, clean: 1,
+  },
+};
+
+const TEMP_LABEL = ["150 °C", "300 °C", "600 °C"];
+
+// ---------- State ----------
+const $ = id => document.getElementById(id);
+let arch = "mono";
+const state = {};
+
+function fillSelect(sel, entries, value) {
+  sel.innerHTML = entries.map(([k, v]) => `<option value="${k}">${v.name}</option>`).join("");
+  sel.value = value;
+}
+fillSelect($("caliber"), Object.entries(CALIBERS), "22lr");
+
+function setArch(a) {
+  arch = a;
+  document.querySelectorAll("#archTabs button").forEach(b => b.classList.toggle("active", b.dataset.arch === a));
+  const A = ARCH[a];
+  fillSelect($("material"), A.mats.map(k => [k, MATERIALS[k]]), A.defMat);
+  for (const [k, v] of Object.entries(A.defaults)) $(k).value = v;
+  if (a === "k" || a === "print") {
+    if ($("caliber").value === "22lr") { $("caliber").value = "556"; $("barrel").value = 16; }
+  } else if (["556", "308"].includes($("caliber").value)) {
+    $("caliber").value = "22lr"; $("barrel").value = 16;
+  }
+  renderArchCard();
+  update(true);
+}
+
+function renderArchCard() {
+  const A = ARCH[arch];
+  $("archCard").innerHTML = `<h2>${A.title}</h2><p style="margin-top:0">${A.desc}</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div><strong style="color:var(--ok)">Strengths</strong><ul class="notes">${A.pros.map(p => `<li>${p}</li>`).join("")}</ul></div>
+      <div><strong style="color:var(--warn)">Weaknesses</strong><ul class="notes">${A.cons.map(p => `<li>${p}</li>`).join("")}</ul></div>
+    </div>`;
+}
+
+// ---------- Engineering model ----------
+function compute() {
+  const C = CALIBERS[$("caliber").value];
+  const M = MATERIALS[$("material").value];
+  const L = +$("barrel").value, od = +$("od").value, wall = +$("wall").value;
+  const len = +$("len").value, count = +$("count").value, blast = +$("blast").value;
+  const sf = +$("sf").value, dlf = +$("dlf").value, duty = +$("duty").value;
+
+  const pm = Math.min(C.refPm * Math.pow(C.refLen / L, 1.3), 0.6 * C.saami);   // ksi
+  const ro = od / 2, ri = ro - wall;
+  // Gas column (case + bore) at muzzle pressure expands isentropically into the blast chamber
+  const vGas = C.caseV + Math.PI * (C.bullet / 2) ** 2 * L;
+  const vBc = Math.PI * Math.max(ri, 0.05) ** 2 * blast;
+  const pbc = pm * Math.pow(vGas / (vGas + vBc), 1.25);                         // quasi-static, ksi
+  const pd = pbc * dlf;                                                         // design wall pressure, ksi
+  const allow = M.y * M.derate[duty] * M.proc / sf;                             // ksi
+  const hoop = ri > 0 ? pd * (ro * ro + ri * ri) / (ro * ro - ri * ri) : Infinity;
+  const util = allow > 0 ? hoop / allow : Infinity;
+  // Minimum wall for a fixed OD (Lamé, inverted)
+  const tMin = allow > pd ? ro - ro * Math.sqrt((allow - pd) / (allow + pd)) : Infinity;
+
+  // Bore: common practice is ~0.040" diametral clearance centerfire, ~0.030" rimfire
+  const clearance = C.centerfire ? 0.040 : 0.030;
+  const bore = C.bullet + clearance;
+
+  // Volumes (in^3) & mass
+  const vInt = Math.PI * ri * ri * len;
+  const vBlast = Math.PI * ri * ri * blast;
+  const baffleFrac = arch === "mono" ? 0.45 : arch === "k" ? 0.22 : 0.25;
+  const vTube = Math.PI * (ro * ro - ri * ri) * len;
+  const vSolids = vInt * baffleFrac * (arch === "mono" ? 1 : 0.6);
+  const massG = (vTube + vSolids) * 16.387 * M.rho;
+
+  // Heuristic critical-control-point scores (1–5)
+  const A = ARCH[arch];
+  const gasClass = { "22lr": 0.4, "9mm": 0.7, "45acp": 0.7, "300blk": 0.9, "556": 1.2, "308": 1.6 }[$("caliber").value];
+  const volPerGas = vInt / gasClass;                 // bigger can per unit of gas -> quieter
+  const clamp = v => Math.max(1, Math.min(5, Math.round(v)));
+  const sup = clamp(A.suppression + Math.log2(volPerGas / 8) + (count >= 7 ? 0.3 : -0.3));
+  const back = clamp(A.back - (count - 6) * 0.15 + (M.kind === "poly" ? 0 : 0));
+  const frp = clamp(A.frp + Math.log2(vBlast / (1.2 * gasClass)) * 0.8);
+  const durScale = M.kind === "poly" ? -3 : (M.derate[duty] < 0.5 ? -1.5 : 0) + (M.y > 120 ? 0.5 : 0);
+  const dur = clamp(A.durability + durScale - (util > 1 ? 2 : 0));
+  const atEar = clamp((sup + back) / 2);
+  const weight = clamp(5 - Math.log2(Math.max(massG, 40) / 80));
+
+  return { C, M, L, od, wall, len, count, blast, sf, dlf, duty, pm, pbc, pd, ro, ri, allow, hoop, util, tMin,
+    bore, clearance, vInt, vBlast, massG, scores: { sup, atEar, back, frp, dur, clean: A.clean, weight } };
+}
+
+function fmt(v, d = 2) { return Number.isFinite(v) ? v.toFixed(d) : "—"; }
+
+function renderResults(r) {
+  const v = $("verdict"), bar = $("utilBar");
+  let cls, msg;
+  if (r.allow <= 0) { cls = "bad"; msg = `✕ ${r.M.name} has no usable strength at ${TEMP_LABEL[r.duty]}`; }
+  else if (r.util > 1) { cls = "bad"; msg = `✕ Wall too thin: ${fmt(r.util * 100, 0)} % of allowable`; }
+  else if (r.util > 0.8) { cls = "warn"; msg = `! Marginal: ${fmt(r.util * 100, 0)} % of allowable`; }
+  else { cls = "ok"; msg = `✓ Within limit: ${fmt(r.util * 100, 0)} % of allowable`; }
+  v.className = "verdict " + cls; v.textContent = msg;
+  const u = Math.min(r.util, 1.5) / 1.5 * 100;
+  bar.style.width = (Number.isFinite(u) ? u : 100) + "%";
+  bar.style.background = `var(--${cls})`;
+
+  const rows = [
+    ["Est. muzzle pressure", `${fmt(r.pm, 1)} ksi`],
+    ["Blast chamber, expanded", `${fmt(r.pbc, 2)} ksi`],
+    ["Design wall pressure (× DLF)", `${fmt(r.pd, 2)} ksi`],
+    ["Peak hoop stress", `${fmt(r.hoop, 1)} ksi`],
+    [`Allowable @ ${TEMP_LABEL[r.duty]}`, `${fmt(r.allow, 1)} ksi`],
+    ["Minimum wall at this OD", Number.isFinite(r.tMin) ? `${fmt(r.tMin, 3)} in` : "not achievable"],
+    ["Current wall", `${fmt(r.wall, 3)} in`],
+    ["Bore (bullet + clearance)", `${fmt(r.bore, 3)} in`],
+    ["Internal volume", `${fmt(r.vInt, 1)} in³`],
+    ["Blast chamber volume", `${fmt(r.vBlast, 1)} in³`],
+    ["Est. mass", `${fmt(r.massG, 0)} g (${fmt(r.massG / 28.35, 1)} oz)`],
+  ];
+  $("pressureKv").innerHTML = rows.map(([k, val]) => `<div>${k}</div><div>${val}</div>`).join("");
+
+  const S = r.scores;
+  const labels = [
+    ["Muzzle suppression", S.sup], ["At-ear (gas gun)", S.atEar], ["Low back pressure", S.back],
+    ["First-round pop control", S.frp], ["Durability", S.dur], ["Serviceability", S.clean], ["Light weight", S.weight],
+  ];
+  $("scores").innerHTML = labels.map(([k, s]) =>
+    `<div class="score"><div>${k}</div><div class="pips">${[1,2,3,4,5].map(i => `<i class="${i <= s ? "on" : ""}"></i>`).join("")}</div><div>${s}</div></div>`).join("");
+
+  const flags = [];
+  if (r.util > 1) flags.push(`The tube wall needs at least <strong>${Number.isFinite(r.tMin) ? fmt(r.tMin, 3) + '"' : "a stronger material"}</strong> at this OD, material and temperature.`);
+  if (r.M.kind === "poly") flags.push("Polymer prints lose most of their strength somewhere between 60 and 150 °C. Centerfire gas can reach that temperature within a few rounds. Treat these as low-pressure rimfire concepts only.");
+  if (r.M.name.startsWith("7075") && r.duty > 0) flags.push("7075-T6 overages and loses much of its strength above about 150 °C. Commercial aluminium cans are mostly limited to rimfire and pistol use.");
+  if (r.M.kind === "am") flags.push("Printed metal parts depend on stress relief or HIP, removal of trapped powder, and CT or proof testing. The process factor of 0.85 here allows for porosity and anisotropy.");
+  if (arch === "k" && r.C.centerfire && r.M.name.startsWith("316")) flags.push("Annealed 316L has low yield strength. Stacks usually use 17-4 PH, titanium, Inconel or a Stellite blast baffle.");
+  if (["556", "308"].includes($("caliber").value) && r.L < 12) flags.push("A short barrel puts much higher muzzle pressure and erosion on the blast baffle. Consider a sacrificial blast baffle in Inconel or Stellite.");
+  if (r.blast < 0.9 && r.C.centerfire) flags.push("A short blast chamber gives the first, cold shot less room to expand. That usually means more first-round pop.");
+  if (arch === "mono" && r.C.centerfire && ["556", "308"].includes($("caliber").value)) flags.push("Monocores are rarely used on centerfire rifles because their thin ramps erode quickly.");
+  if (r.bore - r.C.bullet < 0.03) flags.push("Bore clearance is tight. Concentricity to the barrel axis becomes critical to avoid baffle strikes.");
+  flags.push("Thread pitch, shoulder squareness and bore alignment matter as much as wall thickness. Most catastrophic failures start with a baffle strike, not with tube burst.");
+  $("flags").innerHTML = flags.map(f => `<li>${f}</li>`).join("");
+}
+
+// ---------- 3D ----------
+let renderer, scene, camera, controls, model, clipPlane;
+const glOk = (() => { try { const c = document.createElement("canvas"); return !!(window.WebGLRenderingContext && (c.getContext("webgl") || c.getContext("experimental-webgl"))); } catch (e) { return false; } })();
+
+const COLORS = { tube: 0x8a96a8, baffle: 0xd08a3c, core: 0x5aa0d8, mount: 0x4a5160, gas: 0xff5050, cap: 0x6b7585 };
+
+function initGL() {
+  const host = $("viewport");
+  if (!glOk || !window.THREE) { $("glfail").style.display = "block"; return; }
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.localClippingEnabled = true;
+  host.prepend(renderer.domElement);
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(35, 1, 0.1, 200);
+  camera.position.set(4, 3.5, 9);
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x445066, 0.85));
+  const d1 = new THREE.DirectionalLight(0xffffff, 0.8); d1.position.set(5, 8, 6); scene.add(d1);
+  const d2 = new THREE.DirectionalLight(0xffffff, 0.35); d2.position.set(-6, -2, -4); scene.add(d2);
+  clipPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
+  new ResizeObserver(resize).observe(host);
+  resize();
+  $("legend").innerHTML = `<span style="background:#8a96a8"></span>Tube<span style="background:#d08a3c"></span>Baffles<span style="background:#5aa0d8"></span>Core / mount<span style="background:#ff5050"></span>Gas path`;
+  (function loop() {
+    requestAnimationFrame(loop);
+    if ($("spin").checked && model) model.rotation.x += 0.004;
+    controls.update(); renderer.render(scene, camera);
+  })();
+}
+
+function resize() {
+  if (!renderer) return;
+  const host = $("viewport"), w = host.clientWidth, h = host.clientHeight;
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+
+function mat(color, opts = {}) {
+  return new THREE.MeshStandardMaterial(Object.assign({
+    color, metalness: 0.55, roughness: 0.45, side: THREE.DoubleSide,
+    clippingPlanes: $("cut").checked ? [clipPlane] : [],
+  }, opts));
+}
+
+// Closed (r, y) profile revolved about Y
+function lathe(points, color, opts) {
+  const g = new THREE.LatheGeometry(points.map(([r, y]) => new THREE.Vector2(r, y)), 72);
+  return new THREE.Mesh(g, mat(color, opts));
+}
+const ring = (r0, r1, y0, y1) => [[r0, y0], [r1, y0], [r1, y1], [r0, y1], [r0, y0]];
+
+function buildModel(r) {
+  if (!scene) return;
+  if (model) { scene.remove(model); model.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); }
+  model = new THREE.Group();
+  const s = 1;                     // 1 scene unit = 1 inch
+  const ro = r.ro * s, ri = Math.max(r.ri, 0.05) * s, len = r.len * s, rb = r.bore / 2 * s;
+  const ex = $("explode").checked ? 0.35 : 0;
+  const t = Math.max(0.035, r.wall * 0.9);     // internal part thickness for display
+  const mount = 0.6, cap = 0.15;
+  const parts = new THREE.Group();
+
+  // Rear mount (threaded section)
+  const mountMesh = lathe(ring(rb * 1.15, ro * 0.98, -mount, 0), COLORS.mount);
+  parts.add(mountMesh);
+  for (let i = 0; i < 6; i++) {
+    const th = lathe(ring(rb * 1.15 + 0.12, ro * 0.6, -mount + 0.06 + i * 0.08, -mount + 0.1 + i * 0.08), COLORS.cap);
+    parts.add(th);
+  }
+
+  // Tube (offset outward when exploded)
+  const tube = lathe(ring(ri, ro, 0, len), COLORS.tube, { metalness: 0.7, roughness: 0.35 });
+  tube.position.y = 0;
+  if (ex) { tube.position.x = 0; tube.position.z = 0; tube.scale.set(1, 1, 1); }
+  const tubeGroup = new THREE.Group(); tubeGroup.add(tube);
+  if (ex) tubeGroup.position.y = len * 0.15;
+
+  // Front cap
+  const capMesh = lathe(ring(rb, ro, len, len + cap), COLORS.cap);
+  capMesh.position.y = ex * (r.count + 2);
+  parts.add(capMesh);
+
+  const stackStart = r.blast * s, stackLen = len - stackStart;
+  const pitch = stackLen / r.count;
+
+  if (arch === "k") {
+    for (let i = 0; i < r.count; i++) {
+      const y0 = stackStart + i * pitch;
+      const g = new THREE.Group();
+      const cone = pitch * 0.62, skirt = Math.max(0.03, t * 0.8);
+      // Forward-pointing cone: apex (bore) at rear
+      g.add(lathe([[rb, 0], [ri - skirt, cone], [ri - skirt, cone + t], [rb, t * 1.3], [rb, 0]], COLORS.baffle));
+      // Spacer skirt
+      g.add(lathe(ring(ri - skirt, ri - 0.002, cone, pitch), COLORS.baffle));
+      // Reverse scoop lip ("K" leg)
+      const lip0 = pitch * 0.9, lipR = ri * 0.62;
+      g.add(lathe([[ri - skirt, lip0], [lipR, lip0 - pitch * 0.22], [lipR, lip0 - pitch * 0.22 + t], [ri - skirt, lip0 + t], [ri - skirt, lip0]], COLORS.baffle));
+      g.position.y = y0 + ex * (i + 1);
+      parts.add(g);
+    }
+  } else if (arch === "mono") {
+    const rc = ri - 0.004;
+    const tilt = 0.55;  // rad
+    for (let i = 0; i <= r.count; i++) {
+      const y0 = stackStart + i * pitch;
+      if (y0 > len - 0.05) break;
+      // Slanted wall: elliptical plate with bore hole
+      const a = rc / Math.cos(tilt);
+      const shape = new THREE.Shape(); shape.absellipse(0, 0, a, rc, 0, Math.PI * 2, false, 0);
+      const hole = new THREE.Path(); hole.absellipse(0, 0, rb / Math.cos(tilt), rb, 0, Math.PI * 2, true, 0);
+      shape.holes.push(hole);
+      const geo = new THREE.ExtrudeGeometry(shape, { depth: t * 1.6, bevelEnabled: false, curveSegments: 48 });
+      geo.translate(0, 0, -t * 0.8);
+      const plate = new THREE.Mesh(geo, mat(COLORS.core));
+      plate.rotation.x = Math.PI / 2;
+      const holder = new THREE.Group(); holder.add(plate);
+      holder.rotation.z = (i % 2 ? 1 : -1) * tilt;
+      // Clip plate to the core diameter visually by scaling (ellipse projects to circle of rc)
+      holder.position.y = y0 + ex * (i + 1) * 0.4;
+      parts.add(holder);
+    }
+    // Core spine: two partial sleeves form the solid body; open windows are the ports
+    const spineGeo = (start) => new THREE.CylinderGeometry(rc, rc, stackLen, 48, 1, true, start, Math.PI * 0.55);
+    for (const st of [Math.PI * 0.225, Math.PI * 1.225]) {
+      const m = new THREE.Mesh(spineGeo(st), mat(COLORS.core));
+      m.position.y = stackStart + stackLen / 2 + ex * r.count * 0.2;
+      parts.add(m);
+    }
+    // Thick core inner walls
+    const spineIn = (start) => new THREE.CylinderGeometry(rc - 0.06, rc - 0.06, stackLen, 48, 1, true, start, Math.PI * 0.55);
+    for (const st of [Math.PI * 0.225, Math.PI * 1.225]) {
+      const m = new THREE.Mesh(spineIn(st), mat(COLORS.core));
+      m.position.y = stackStart + stackLen / 2 + ex * r.count * 0.2;
+      parts.add(m);
+    }
+  } else {
+    // Fully printed: integral conical baffles + helical flow-through outer channels
+    for (let i = 0; i < r.count; i++) {
+      const y0 = stackStart + i * pitch;
+      const rIn = ri * 0.72;  // inner coaxial sleeve
+      const g = new THREE.Group();
+      g.add(lathe([[rb, 0], [rIn, pitch * 0.7], [rIn, pitch * 0.7 + t], [rb, t * 1.4], [rb, 0]], COLORS.baffle, { roughness: 0.75 }));
+      g.position.y = y0 + ex * (i + 1) * 0.5;
+      parts.add(g);
+    }
+    // Inner coaxial sleeve (printed as one with tube)
+    const rIn = ri * 0.72;
+    parts.add(lathe(ring(rIn, rIn + t, stackStart, len), COLORS.baffle, { roughness: 0.75 }));
+    // Helical ribs in the outer channel
+    const ribs = 4;
+    for (let k = 0; k < ribs; k++) {
+      const pts = [];
+      const turns = 1.2;
+      for (let j = 0; j <= 80; j++) {
+        const u = j / 80, ang = k * Math.PI * 2 / ribs + u * turns * Math.PI * 2;
+        const rr = (rIn + t + ri) / 2;
+        pts.push(new THREE.Vector3(Math.cos(ang) * rr, stackStart + u * stackLen, Math.sin(ang) * rr));
+      }
+      const curve = new THREE.CatmullRomCurve3(pts);
+      const geo = new THREE.TubeGeometry(curve, 120, (ri - rIn - t) / 2 * 0.9, 8, false);
+      parts.add(new THREE.Mesh(geo, mat(COLORS.baffle, { roughness: 0.75 })));
+    }
+    // Printed blast baffle (thicker)
+    parts.add(lathe([[rb, stackStart - 0.4], [ri, stackStart], [ri, stackStart + t * 2], [rb, stackStart - 0.4 + t * 2.5], [rb, stackStart - 0.4]], COLORS.baffle, { roughness: 0.75 }));
+  }
+
+  // Gas path visual
+  if ($("gas").checked) {
+    const pts = [];
+    const n = 60;
+    for (let j = 0; j <= n; j++) {
+      const u = j / n, y = -mount + u * (len + mount + cap + 0.6);
+      let off = 0;
+      if (y > 0 && y < len) {
+        const local = ((y - stackStart) / pitch) % 1;
+        if (y < stackStart) off = Math.sin(y / stackStart * Math.PI) * ri * 0.55;
+        else if (arch === "mono") off = Math.sin(((y - stackStart) / pitch) * Math.PI) * ri * 0.55;
+        else off = (local > 0.2 && local < 0.75 ? Math.sin((local - 0.2) / 0.55 * Math.PI) : 0) * (ri - rb) * 0.7;
+      }
+      pts.push(new THREE.Vector3(off, y, 0));
+    }
+    const curve = new THREE.CatmullRomCurve3(pts);
+    parts.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 200, 0.022, 6, false),
+      new THREE.MeshBasicMaterial({ color: COLORS.gas, transparent: true, opacity: 0.85 })));
+    const core = new THREE.Mesh(new THREE.CylinderGeometry(rb * 0.35, rb * 0.35, len + mount + cap + 0.6, 12),
+      new THREE.MeshBasicMaterial({ color: COLORS.gas, transparent: true, opacity: 0.35 }));
+    core.position.y = (len + cap + 0.6 - mount) / 2;
+    parts.add(core);
+  }
+
+  model.add(tubeGroup); model.add(parts);
+  // Lay along X, centred
+  const totalShift = (len + (ex ? ex * (r.count + 2) : 0)) / 2;
+  model.children.forEach(c => c.position.y -= totalShift);
+  const wrap = new THREE.Group(); wrap.add(model);
+  model.rotation.set(0, 0, 0);
+  wrap.rotation.z = -Math.PI / 2;
+  scene.add(wrap);
+  // keep reference to the wrapper so it is removed next rebuild
+  const inner = model; model = wrap; model.userData.inner = inner;
+}
+
+let lastSig = "";
+function update(resetCam) {
+  for (const id of ["barrel", "od", "wall", "len", "count", "blast", "sf", "dlf"]) {
+    const v = +$(id).value;
+    $(id + "Out").textContent = id === "count" ? v : id === "sf" || id === "dlf" ? v.toFixed(1) + "×" : id === "wall" ? v.toFixed(3) + '"' : v.toFixed(id === "od" ? 2 : 1) + '"';
+  }
+  // Keep blast chamber shorter than the can
+  if (+$("blast").value > +$("len").value - 1.5) $("blast").value = (+$("len").value - 1.5).toFixed(2);
+  const r = compute();
+  renderResults(r);
+  buildModel(r);
+  if (resetCam && camera) { camera.position.set(r.len * 0.4, r.len * 0.35, r.len * 1.25); controls.target.set(0, 0, 0); }
+}
+
+$("archTabs").addEventListener("click", e => { if (e.target.dataset.arch) setArch(e.target.dataset.arch); });
+$("caliber").addEventListener("change", () => { $("barrel").value = CALIBERS[$("caliber").value].defLen; update(); });
+document.querySelectorAll("input, select").forEach(el => {
+  if (el.id !== "caliber" && el.id !== "spin") el.addEventListener("input", () => update());
+});
+
+initGL();
+$("barrel").value = 16;
+setArch("mono");
+</script>
+</body>
+</html>
