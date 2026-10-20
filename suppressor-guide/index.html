@@ -72,6 +72,11 @@
   details summary { cursor: pointer; font-weight: 600; }
   details p, details li { font-size: 13px; }
   footer { padding: 0 16px 24px; }
+  .subtabs { display: flex; gap: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 4px; }
+  .subtabs button { flex: 1; border: 0; background: transparent; color: var(--muted); padding: 7px; border-radius: 7px; cursor: pointer; font-weight: 600; }
+  .subtabs button.active { background: var(--accent); color: #fff; }
+  .hidden { display: none !important; }
+  #profileSvg { width: 100%; height: auto; background: var(--viewport); border-radius: 8px; border: 1px solid var(--line); }
 </style>
 </head>
 <body>
@@ -90,7 +95,55 @@
 <main>
   <!-- Controls -->
   <section class="stack">
-    <div class="card">
+    <div class="subtabs" id="paneTabs">
+      <button data-pane="assembly" class="active">Assembly</button>
+      <button data-pane="baffle">Baffle designer</button>
+    </div>
+
+    <div class="card pane-baffle hidden">
+      <h2>Baffle profile</h2>
+      <div class="field">
+        <label for="bstyle">Style</label>
+        <select id="bstyle">
+          <option value="k">K (cone + scoop lip)</option>
+          <option value="cone">Conical</option>
+          <option value="flat">Flat / washer</option>
+        </select>
+      </div>
+      <div class="field" id="angleField">
+        <label for="angle">Cone angle from the cross-plane (°)</label>
+        <div class="row"><input type="range" id="angle" min="0" max="70" step="1" value="45"><output id="angleOut"></output></div>
+      </div>
+      <div class="field">
+        <label for="bthick">Baffle thickness (in)</label>
+        <div class="row"><input type="range" id="bthick" min="0.020" max="0.150" step="0.005" value="0.050"><output id="bthickOut"></output></div>
+      </div>
+      <div class="field" id="lipField">
+        <label for="lip">Scoop lip depth (% of the annulus)</label>
+        <div class="row"><input type="range" id="lip" min="0" max="70" step="1" value="38"><output id="lipOut"></output></div>
+      </div>
+      <svg id="profileSvg" viewBox="0 0 300 150" role="img" aria-label="Half-section of one baffle"></svg>
+      <p class="muted">Half-section of one baffle. The bore line is at the bottom and gas flows left to right.</p>
+    </div>
+
+    <div class="card pane-baffle hidden">
+      <h2>Spacing</h2>
+      <div class="field">
+        <label for="spacing">Spacing pattern</label>
+        <select id="spacing">
+          <option value="uniform">Uniform</option>
+          <option value="grow">Progressive: gaps grow toward the muzzle</option>
+          <option value="shrink">Progressive: gaps shrink toward the muzzle</option>
+        </select>
+      </div>
+      <div class="field" id="ratioField">
+        <label for="ratio">Gap-to-gap ratio</label>
+        <div class="row"><input type="range" id="ratio" min="1.02" max="1.30" step="0.01" value="1.10"><output id="ratioOut"></output></div>
+      </div>
+      <div class="kv" id="gapKv"></div>
+    </div>
+
+    <div class="card pane-assembly">
       <h2>Host &amp; load</h2>
       <div class="field">
         <label for="caliber">Caliber</label>
@@ -110,7 +163,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card pane-assembly">
       <h2>Geometry</h2>
       <div class="field">
         <label for="material">Tube / core material</label>
@@ -295,6 +348,8 @@ function setArch(a) {
   const A = ARCH[a];
   fillSelect($("material"), A.mats.map(k => [k, MATERIALS[k]]), A.defMat);
   for (const [k, v] of Object.entries(A.defaults)) $(k).value = v;
+  const bd = { mono: { angle: 32, bstyle: "cone" }, k: { angle: 45, bstyle: "k" }, print: { angle: 40, bstyle: "cone" } }[a];
+  $("angle").value = bd.angle; $("bstyle").value = bd.bstyle;
   if (a === "k" || a === "print") {
     if ($("caliber").value === "22lr") { $("caliber").value = "556"; $("barrel").value = 16; }
   } else if (["556", "308"].includes($("caliber").value)) {
@@ -334,9 +389,22 @@ function compute() {
   // Minimum wall for a fixed OD (Lamé, inverted)
   const tMin = allow > pd ? ro - ro * Math.sqrt((allow - pd) / (allow + pd)) : Infinity;
 
+  // Baffle layout: gap widths from the spacing pattern, scaled to fill the stack
+  const ratio = +$("ratio").value, mode = $("spacing").value;
+  const stackLen = len - blast;
+  const w = Array.from({ length: count }, (_, i) => mode === "uniform" ? 1 : Math.pow(mode === "grow" ? ratio : 1 / ratio, i));
+  const wSum = w.reduce((a, b) => a + b, 0);
+  const gaps = w.map(x => x / wSum * stackLen);
+  const pos = gaps.map((_, i) => blast + gaps.slice(0, i).reduce((a, b) => a + b, 0));
+  const bstyle = arch === "mono" ? "ramp" : $("bstyle").value;
+  const angle = +$("angle").value, bthick = +$("bthick").value, lip = +$("lip").value / 100;
+
   // Bore: common practice is ~0.040" diametral clearance centerfire, ~0.030" rimfire
   const clearance = C.centerfire ? 0.040 : 0.030;
   const bore = C.bullet + clearance;
+  const rOuterBaffle = arch === "print" ? ri * 0.72 : ri - Math.max(0.03, bthick * 0.8);
+  const coneDepth = bstyle === "flat" ? 0 : (rOuterBaffle - bore / 2) * Math.tan(angle * Math.PI / 180);
+  const minGap = Math.min(...gaps);
 
   // Volumes (in^3) & mass
   const vInt = Math.PI * ri * ri * len;
@@ -351,16 +419,19 @@ function compute() {
   const gasClass = { "22lr": 0.4, "9mm": 0.7, "45acp": 0.7, "300blk": 0.9, "556": 1.2, "308": 1.6 }[$("caliber").value];
   const volPerGas = vInt / gasClass;                 // bigger can per unit of gas -> quieter
   const clamp = v => Math.max(1, Math.min(5, Math.round(v)));
-  const sup = clamp(A.suppression + Math.log2(volPerGas / 8) + (count >= 7 ? 0.3 : -0.3));
-  const back = clamp(A.back - (count - 6) * 0.15 + (M.kind === "poly" ? 0 : 0));
+  const styleSup = { k: 0.4, cone: 0, flat: -0.8, ramp: 0 }[bstyle];
+  const styleBack = { k: -0.4, cone: 0, flat: 0.3, ramp: 0 }[bstyle];
+  const angleAdj = arch === "mono" ? 0 : (angle - 45) / 45;       // deeper cones strip more gas
+  const sup = clamp(A.suppression + Math.log2(volPerGas / 8) + (count >= 7 ? 0.3 : -0.3) + styleSup + angleAdj * 0.4 + lip * (bstyle === "k" ? 0.6 : 0));
+  const back = clamp(A.back - (count - 6) * 0.15 + styleBack - angleAdj * 0.3 - lip * (bstyle === "k" ? 0.6 : 0));
   const frp = clamp(A.frp + Math.log2(vBlast / (1.2 * gasClass)) * 0.8);
   const durScale = M.kind === "poly" ? -3 : (M.derate[duty] < 0.5 ? -1.5 : 0) + (M.y > 120 ? 0.5 : 0);
-  const dur = clamp(A.durability + durScale - (util > 1 ? 2 : 0));
+  const dur = clamp(A.durability + durScale - (util > 1 ? 2 : 0) + (bstyle === "flat" ? -1 : 0) + (bthick < 0.035 && C.centerfire ? -1 : 0));
   const atEar = clamp((sup + back) / 2);
   const weight = clamp(5 - Math.log2(Math.max(massG, 40) / 80));
 
   return { C, M, L, od, wall, len, count, blast, sf, dlf, duty, pm, pbc, pd, ro, ri, allow, hoop, util, tMin,
-    bore, clearance, vInt, vBlast, massG, scores: { sup, atEar, back, frp, dur, clean: A.clean, weight } };
+    bore, clearance, vInt, vBlast, massG, gaps, pos, bstyle, angle, bthick, lip, coneDepth, minGap, rOuterBaffle, mode, scores: { sup, atEar, back, frp, dur, clean: A.clean, weight } };
 }
 
 function fmt(v, d = 2) { return Number.isFinite(v) ? v.toFixed(d) : "—"; }
@@ -409,9 +480,59 @@ function renderResults(r) {
   if (["556", "308"].includes($("caliber").value) && r.L < 12) flags.push("A short barrel puts much higher muzzle pressure and erosion on the blast baffle. Consider a sacrificial blast baffle in Inconel or Stellite.");
   if (r.blast < 0.9 && r.C.centerfire) flags.push("A short blast chamber gives the first, cold shot less room to expand. That usually means more first-round pop.");
   if (arch === "mono" && r.C.centerfire && ["556", "308"].includes($("caliber").value)) flags.push("Monocores are rarely used on centerfire rifles because their thin ramps erode quickly.");
+  if (arch !== "mono" && r.coneDepth + r.bthick > r.minGap * 0.9) flags.push(`At ${r.angle}° the cone is about ${fmt(r.coneDepth, 2)}" deep, which is longer than the tightest gap (${fmt(r.minGap, 2)}"). The baffles would nest into each other. Reduce the angle or the baffle count, or lengthen the can.`);
+  if (arch !== "mono" && r.bstyle === "flat" && r.C.centerfire) flags.push("A flat baffle takes the jet face-on. It erodes quickly and reflects more gas backward than a cone does.");
+  if (arch !== "mono" && r.mode === "shrink") flags.push("Shrinking gaps put the largest chambers at the rear. The early chambers see the most gas, so that is usually where the extra volume does the most good.");
   if (r.bore - r.C.bullet < 0.03) flags.push("Bore clearance is tight. Concentricity to the barrel axis becomes critical to avoid baffle strikes.");
   flags.push("Thread pitch, shoulder squareness and bore alignment matter as much as wall thickness. Most catastrophic failures start with a baffle strike, not with tube burst.");
+  renderBaffleUi(r);
   $("flags").innerHTML = flags.map(f => `<li>${f}</li>`).join("");
+}
+
+function renderBaffleUi(r) {
+  const mono = arch === "mono";
+  $("bstyle").disabled = mono;
+  $("lipField").classList.toggle("hidden", mono || $("bstyle").value !== "k");
+  $("angleField").classList.toggle("hidden", !mono && $("bstyle").value === "flat");
+  $("ratioField").classList.toggle("hidden", $("spacing").value === "uniform");
+  document.querySelector('label[for="angle"]').textContent = mono ? "Ramp angle from the cross-plane (°)" : "Cone angle from the cross-plane (°)";
+  $("gapKv").innerHTML = [
+    ["Stack length", `${fmt(r.len - r.blast, 2)} in`],
+    ["Smallest gap", `${fmt(Math.min(...r.gaps), 2)} in`],
+    ["Largest gap", `${fmt(Math.max(...r.gaps), 2)} in`],
+    [mono ? "Ramp angle" : "Cone depth", mono ? `${r.angle}°` : `${fmt(r.coneDepth, 2)} in`],
+  ].map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join("");
+
+  // Half-section sketch of one baffle, scaled to the median gap
+  const gap = r.gaps[Math.floor(r.gaps.length / 2)], ri = r.ri, rb = r.bore / 2;
+  const W = 300, H = 150, pad = 14;
+  const k = Math.min((W - 2 * pad) / (gap * 1.15), (H - 2 * pad) / (r.ro * 1.05));
+  const X = z => pad + z * k, Y = rr => H - pad - rr * k;
+  const poly = pts => `<polygon points="${pts.map(([z, rr]) => `${X(z).toFixed(1)},${Y(rr).toFixed(1)}`).join(" ")}" />`;
+  const t = r.bthick, ro = r.rOuterBaffle;
+  const d = Math.min(r.coneDepth, gap * 0.85);
+  let shapes = "";
+  if (mono) {
+    const a = r.angle * Math.PI / 180, dz = (ri - rb) * Math.tan(a);
+    shapes = poly([[gap * 0.5 - dz / 2, rb], [gap * 0.5 + dz / 2, ri], [gap * 0.5 + dz / 2 + t * 1.6, ri], [gap * 0.5 - dz / 2 + t * 1.6, rb]]);
+  } else if (r.bstyle === "flat") {
+    shapes = poly([[0, rb], [0, ro], [t, ro], [t, rb]]) + (arch === "k" ? poly([[0, ro], [gap, ro], [gap, ri], [0, ri]]) : "");
+  } else {
+    shapes = poly([[0, rb], [d, ro], [d + t, ro], [t * 1.3, rb]]);
+    if (arch === "k") {
+      shapes += poly([[d, ro], [gap, ro], [gap, ri], [d, ri]]);
+      if (r.bstyle === "k" && r.lip > 0) {
+        const lipR = ro - r.lip * (ro - rb), lz = gap * 0.9;
+        shapes += poly([[lz, ro], [lz - gap * 0.22, lipR], [lz - gap * 0.22 + t, lipR], [lz + t, ro]]);
+      }
+    }
+  }
+  const css = getComputedStyle(document.documentElement);
+  $("profileSvg").innerHTML = `
+    <rect x="${X(0)}" y="${Y(r.ro)}" width="${gap * k}" height="${(r.ro - ri) * k}" fill="${css.getPropertyValue("--muted").trim()}" opacity=".45" />
+    <g fill="#d08a3c" stroke="#8a5a22" stroke-width="1">${shapes}</g>
+    <line x1="${pad}" x2="${W - pad}" y1="${Y(0)}" y2="${Y(0)}" stroke="#ff5050" stroke-dasharray="5 4" />
+    <line x1="${pad}" x2="${W - pad}" y1="${Y(rb)}" y2="${Y(rb)}" stroke="${css.getPropertyValue("--muted").trim()}" stroke-width=".6" opacity=".6" />`;
 }
 
 // ---------- 3D ----------
@@ -473,7 +594,7 @@ function buildModel(r) {
   const s = 1;                     // 1 scene unit = 1 inch
   const ro = r.ro * s, ri = Math.max(r.ri, 0.05) * s, len = r.len * s, rb = r.bore / 2 * s;
   const ex = $("explode").checked ? 0.35 : 0;
-  const t = Math.max(0.035, r.wall * 0.9);     // internal part thickness for display
+  let t = Math.max(0.035, r.wall * 0.9);       // internal part thickness for display
   const mount = 0.6, cap = 0.15;
   const parts = new THREE.Group();
 
@@ -498,28 +619,35 @@ function buildModel(r) {
   parts.add(capMesh);
 
   const stackStart = r.blast * s, stackLen = len - stackStart;
-  const pitch = stackLen / r.count;
+  t = Math.max(0.02, r.bthick);
 
   if (arch === "k") {
     for (let i = 0; i < r.count; i++) {
-      const y0 = stackStart + i * pitch;
+      const y0 = r.pos[i], gap = r.gaps[i];
       const g = new THREE.Group();
-      const cone = pitch * 0.62, skirt = Math.max(0.03, t * 0.8);
-      // Forward-pointing cone: apex (bore) at rear
-      g.add(lathe([[rb, 0], [ri - skirt, cone], [ri - skirt, cone + t], [rb, t * 1.3], [rb, 0]], COLORS.baffle));
+      const ro2 = r.rOuterBaffle;
+      const cone = Math.min(r.coneDepth, gap * 0.85);
+      if (r.bstyle === "flat") {
+        g.add(lathe(ring(rb, ro2, 0, t), COLORS.baffle));
+      } else {
+        // Forward-pointing cone: apex (bore) at rear
+        g.add(lathe([[rb, 0], [ro2, cone], [ro2, cone + t], [rb, t * 1.3], [rb, 0]], COLORS.baffle));
+      }
       // Spacer skirt
-      g.add(lathe(ring(ri - skirt, ri - 0.002, cone, pitch), COLORS.baffle));
+      g.add(lathe(ring(ro2, ri - 0.002, r.bstyle === "flat" ? 0 : cone, gap), COLORS.baffle));
       // Reverse scoop lip ("K" leg)
-      const lip0 = pitch * 0.9, lipR = ri * 0.62;
-      g.add(lathe([[ri - skirt, lip0], [lipR, lip0 - pitch * 0.22], [lipR, lip0 - pitch * 0.22 + t], [ri - skirt, lip0 + t], [ri - skirt, lip0]], COLORS.baffle));
+      if (r.bstyle === "k" && r.lip > 0) {
+        const lip0 = gap * 0.9, lipR = ro2 - r.lip * (ro2 - rb);
+        g.add(lathe([[ro2, lip0], [lipR, lip0 - gap * 0.22], [lipR, lip0 - gap * 0.22 + t], [ro2, lip0 + t], [ro2, lip0]], COLORS.baffle));
+      }
       g.position.y = y0 + ex * (i + 1);
       parts.add(g);
     }
   } else if (arch === "mono") {
     const rc = ri - 0.004;
-    const tilt = 0.55;  // rad
+    const tilt = Math.max(0.1, Math.min(r.angle, 65)) * Math.PI / 180;
     for (let i = 0; i <= r.count; i++) {
-      const y0 = stackStart + i * pitch;
+      const y0 = i < r.count ? r.pos[i] : len - 0.05;
       if (y0 > len - 0.05) break;
       // Slanted wall: elliptical plate with bore hole
       const a = rc / Math.cos(tilt);
@@ -553,10 +681,16 @@ function buildModel(r) {
   } else {
     // Fully printed: integral conical baffles + helical flow-through outer channels
     for (let i = 0; i < r.count; i++) {
-      const y0 = stackStart + i * pitch;
+      const y0 = r.pos[i], gap = r.gaps[i];
       const rIn = ri * 0.72;  // inner coaxial sleeve
       const g = new THREE.Group();
-      g.add(lathe([[rb, 0], [rIn, pitch * 0.7], [rIn, pitch * 0.7 + t], [rb, t * 1.4], [rb, 0]], COLORS.baffle, { roughness: 0.75 }));
+      const cone = Math.min(r.coneDepth, gap * 0.85);
+      const prof = r.bstyle === "flat" ? ring(rb, rIn, 0, t) : [[rb, 0], [rIn, cone], [rIn, cone + t], [rb, t * 1.4], [rb, 0]];
+      g.add(lathe(prof, COLORS.baffle, { roughness: 0.75 }));
+      if (r.bstyle === "k" && r.lip > 0) {
+        const lip0 = gap * 0.9, lipR = rIn - r.lip * (rIn - rb);
+        g.add(lathe([[rIn, lip0], [lipR, lip0 - gap * 0.22], [lipR, lip0 - gap * 0.22 + t], [rIn, lip0 + t], [rIn, lip0]], COLORS.baffle, { roughness: 0.75 }));
+      }
       g.position.y = y0 + ex * (i + 1) * 0.5;
       parts.add(g);
     }
@@ -584,14 +718,15 @@ function buildModel(r) {
   // Gas path visual
   if ($("gas").checked) {
     const pts = [];
-    const n = 60;
+    const n = 160;
     for (let j = 0; j <= n; j++) {
       const u = j / n, y = -mount + u * (len + mount + cap + 0.6);
       let off = 0;
       if (y > 0 && y < len) {
-        const local = ((y - stackStart) / pitch) % 1;
+        let gi = r.pos.findIndex((p0, i) => y >= p0 && y < p0 + r.gaps[i]);
+        const local = gi < 0 ? 0 : (y - r.pos[gi]) / r.gaps[gi];
         if (y < stackStart) off = Math.sin(y / stackStart * Math.PI) * ri * 0.55;
-        else if (arch === "mono") off = Math.sin(((y - stackStart) / pitch) * Math.PI) * ri * 0.55;
+        else if (arch === "mono") off = Math.sin((Math.max(gi, 0) + local) * Math.PI) * ri * 0.55;
         else off = (local > 0.2 && local < 0.75 ? Math.sin((local - 0.2) / 0.55 * Math.PI) : 0) * (ri - rb) * 0.7;
       }
       pts.push(new THREE.Vector3(off, y, 0));
@@ -619,6 +754,10 @@ function buildModel(r) {
 
 let lastSig = "";
 function update(resetCam) {
+  $("angleOut").textContent = $("angle").value + "°";
+  $("bthickOut").textContent = (+$("bthick").value).toFixed(3) + '"';
+  $("lipOut").textContent = $("lip").value + " %";
+  $("ratioOut").textContent = (+$("ratio").value).toFixed(2) + "×";
   for (const id of ["barrel", "od", "wall", "len", "count", "blast", "sf", "dlf"]) {
     const v = +$(id).value;
     $(id + "Out").textContent = id === "count" ? v : id === "sf" || id === "dlf" ? v.toFixed(1) + "×" : id === "wall" ? v.toFixed(3) + '"' : v.toFixed(id === "od" ? 2 : 1) + '"';
@@ -631,6 +770,12 @@ function update(resetCam) {
   if (resetCam && camera) { camera.position.set(r.len * 0.4, r.len * 0.35, r.len * 1.25); controls.target.set(0, 0, 0); }
 }
 
+$("paneTabs").addEventListener("click", e => {
+  const pane = e.target.dataset.pane; if (!pane) return;
+  document.querySelectorAll("#paneTabs button").forEach(b => b.classList.toggle("active", b.dataset.pane === pane));
+  document.querySelectorAll(".pane-assembly").forEach(el => el.classList.toggle("hidden", pane !== "assembly"));
+  document.querySelectorAll(".pane-baffle").forEach(el => el.classList.toggle("hidden", pane !== "baffle"));
+});
 $("archTabs").addEventListener("click", e => { if (e.target.dataset.arch) setArch(e.target.dataset.arch); });
 $("caliber").addEventListener("change", () => { $("barrel").value = CALIBERS[$("caliber").value].defLen; update(); });
 document.querySelectorAll("input, select").forEach(el => {
